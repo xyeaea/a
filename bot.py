@@ -1,53 +1,81 @@
 from pyrogram import Client, filters
+from pymongo import MongoClient
 import requests
 import json
-import uuid
-from config import api_id, api_hash, bot_token, mongo_uri, database_name
+import hmac
+import hashlib
+from config import mongo_uri, db_name, api_id, api_hash, bot_token, tripay_api_key, tripay_private_key
 
-bot = Client("my_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
-
+# Inisialisasi MongoDB
 client = MongoClient(mongo_uri)
-db = client[database_name]  # Mengakses basis data yang ditentukan
+db = client[db_name]
+transactions_collection = db['transactions']  # Ganti nama koleksi jika perlu
 
+# Inisialisasi bot
+app = Client("my_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
 
-# Fungsi untuk mendapatkan QRIS
-def get_qris():
-    # URL endpoint API Tripay untuk QRIS
-    url = "https://api.tripay.co.id/v1/transaction/create"  # Ganti dengan URL endpoint yang benar
+def generate_qris(merchant_ref):
+    url = "https://api.tripay.co.id/v1/transaction/create"
+    payload = {
+        "method": "qris",
+        "merchant_ref": merchant_ref,
+        "amount": 2000,  # Jumlah pembayaran
+        "currency": "IDR",
+        "order_id": merchant_ref,  # Menggunakan merchant_ref sebagai order_id
+        "description": "Pembayaran QRIS",
+        "callback_url": "https://yourdomain.com/callback",  # Ganti dengan URL callback Anda
+        "expiry": 3600,  # Waktu kadaluarsa dalam detik
+    }
+
+    # Membuat signature
+    payload_encoded = json.dumps(payload).encode('utf-8')
+    signature = hmac.new(tripay_private_key.encode('utf-8'), payload_encoded, hashlib.sha256).hexdigest()
 
     headers = {
-        "Authorization": "DEV-xX59dZok3hhuQSEZCnm4dXxwOTKa8e7jJT3sjXpS",  # Ganti dengan API Key Anda
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {tripay_api_key}",
+        "Content-Type": "application/json",
+        "X-Callback-Signature": signature
     }
 
-    # Membuat referensi unik secara otomatis
-    merchant_ref = str(uuid.uuid4())  # Menghasilkan UUID sebagai referensi unik
-
-    # Payload yang sangat minimalis
-    payload = {
-        "amount": 2000,  # Jumlah tetap untuk transaksi
-        "merchant_ref": merchant_ref  # Referensi unik untuk transaksi
-    }
-
-    # Mengirim permintaan ke API
-    response = requests.post(url, headers=headers, json=payload)
-
-    # Mengembalikan hasil response
+    response = requests.post(url, headers=headers, data=payload_encoded)
     return response.json()
 
-@bot.on_message(filters.command("pay") & filters.private)
-async def pay_handler(client, message):
-    transaction = get_qris()  # Dapatkan QRIS dari API Tripay
+def create_merchant_ref(user_id):
+    # Menggunakan ID pengguna dan timestamp untuk membuat merchant_ref yang unik
+    timestamp = int(time.time())
+    return f"INV{user_id}{timestamp}"
 
-    if transaction.get("success"):
-        qris_url = transaction["data"]["qr_url"]  # Ambil URL QRIS
-        merchant_ref = transaction["data"]["merchant_ref"]  # Ambil merchant reference
-        caption = f"Silakan scan QRIS berikut untuk pembayaran.\nMerchant Ref: {merchant_ref}"
+@app.on_message(filters.command("pay"))
+def handle_pay(client, message):
+    merchant_ref = create_merchant_ref(message.from_user.id)  # Buat merchant_ref otomatis
+    response = generate_qris(merchant_ref)
 
-        # Kirim QRIS ke pengguna
-        await message.reply_photo(qris_url, caption=caption)
+    if response['success']:
+        qris_image_url = response['data']['qris']  # Ambil URL QRIS dari respons
+        client.send_photo(
+            chat_id=message.chat.id,
+            photo=qris_image_url,
+            caption="Silakan lakukan pembayaran sebesar Rp 2.000\nSetelah pembayaran, ketik /done untuk mengonfirmasi."
+        )
+        
+        # Simpan transaksi ke MongoDB
+        transactions_collection.insert_one({
+            "merchant_ref": merchant_ref,
+            "user_id": message.from_user.id,
+            "status": "PENDING",
+            "amount": 2000
+        })
     else:
-        error_message = transaction.get("message", "Terjadi kesalahan saat membuat transaksi. Silakan coba lagi.")
-        await message.reply_text(f"Gagal membuat transaksi: {error_message}")
+        client.send_message(
+            chat_id=message.chat.id,
+            text="Terjadi kesalahan saat membuat QRIS. Silakan coba lagi."
+        )
 
-bot.run()
+@app.on_message(filters.command("done"))
+def handle_done(client, message):
+    # Proses konfirmasi pembayaran (misalnya, periksa status di Tripay)
+    # Anda bisa menambahkan logika untuk mengecek status transaksi di sini
+    client.send_message(chat_id=message.chat.id, text="Terima kasih! Pembayaran Anda telah kami terima.")
+
+if __name__ == "__main__":
+    app.run()
