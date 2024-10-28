@@ -2,9 +2,13 @@ from pyrogram import Client, filters
 import requests
 import json
 import uuid
-from config import api_id, api_hash, bot_token, mongo_uri
+from config import api_id, api_hash, bot_token, mongo_uri, database_name
 
 bot = Client("my_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
+
+client = MongoClient(mongo_uri)
+db = client[database_name]  # Mengakses basis data yang ditentukan
+
 
 # Fungsi untuk mendapatkan QRIS
 def get_qris():
