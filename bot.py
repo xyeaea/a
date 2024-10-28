@@ -1,71 +1,49 @@
 from pyrogram import Client, filters
-from pymongo import MongoClient
 import requests
-import time
-import config
+import json
+import uuid
+from config import api_id, api_hash, bot_token, mongo_uri
 
-# Setup MongoDB connection
-client = MongoClient(config.mongo_uri)
-db = client[config.database_name]
-transactions = db["transactions"]
+bot = Client("my_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
 
-bot = Client("payment_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
+# Fungsi untuk mendapatkan QRIS
+def get_qris():
+    # URL endpoint API Tripay untuk QRIS
+    url = "https://api.tripay.co.id/v1/transaction/create"  # Ganti dengan URL endpoint yang benar
 
-# Function to create QRIS payment
-def create_qris_payment(user_id, amount=10000):
-    url = "https://tripay.co.id/api-sandbox/transaction/create"
-    headers = {"Authorization": f"Bearer {config.tripay_api_key}"}
-    data = {
-        "method": "QRIS",
-        "merchant_ref": f"{user_id}-{int(time.time())}",
-        "amount": amount,
-        "customer_name": "Pengguna",
-        "customer_email": "user@example.com"
+    headers = {
+        "Authorization": "Bearer YOUR_TRIPAY_API_KEY",  # Ganti dengan API Key Anda
+        "Content-Type": "application/json"
     }
-    response = requests.post(url, headers=headers, json=data)
-    result = response.json()
-    
-    if result["success"]:
-        transactions.insert_one({
-            "user_id": user_id,
-            "reference": result["data"]["reference"],
-            "amount": amount,
-            "status": "pending"
-        })
-        return result["data"]["checkout_url"]
-    else:
-        return None
 
-# Command /pay
-@bot.on_message(filters.command("pay"))
+    # Membuat referensi unik secara otomatis
+    merchant_ref = str(uuid.uuid4())  # Menghasilkan UUID sebagai referensi unik
+
+    # Payload yang sangat minimalis
+    payload = {
+        "amount": 2000,  # Jumlah tetap untuk transaksi
+        "merchant_ref": merchant_ref  # Referensi unik untuk transaksi
+    }
+
+    # Mengirim permintaan ke API
+    response = requests.post(url, headers=headers, json=payload)
+
+    # Mengembalikan hasil response
+    return response.json()
+
+@bot.on_message(filters.command("pay") & filters.private)
 async def pay_handler(client, message):
-    user_id = message.from_user.id
-    checkout_url = create_qris_payment(user_id)
-    
-    if checkout_url:
-        await message.reply(f"Silakan lakukan pembayaran sebesar Rp10.000 melalui tautan berikut:\n{checkout_url}")
-    else:
-        await message.reply("Terjadi kesalahan saat membuat pembayaran. Silakan coba lagi nanti.")
+    transaction = get_qris()  # Dapatkan QRIS dari API Tripay
 
-# Command /check_payment
-@bot.on_message(filters.command("check_payment"))
-async def check_payment(client, message):
-    user_id = message.from_user.id
-    transaction = transactions.find_one({"user_id": user_id, "status": "pending"})
-    
-    if transaction:
-        url = f"https://tripay.co.id/api-sandbox/transaction/detail?reference={transaction['reference']}"
-        headers = {"Authorization": f"Bearer {config.tripay_api_key}"}
-        response = requests.get(url, headers=headers)
-        result = response.json()
-        
-        if result["success"] and result["data"]["status"] == "PAID":
-            transactions.update_one({"_id": transaction["_id"]}, {"$set": {"status": "paid"}})
-            group_link = "https://t.me/joinchat/xxxxxx"
-            await message.reply(f"Pembayaran berhasil! Berikut adalah link grup: {group_link}")
-        else:
-            await message.reply("Pembayaran belum dikonfirmasi atau masih diproses.")
+    if transaction.get("success"):
+        qris_url = transaction["data"]["qr_url"]  # Ambil URL QRIS
+        merchant_ref = transaction["data"]["merchant_ref"]  # Ambil merchant reference
+        caption = f"Silakan scan QRIS berikut untuk pembayaran.\nMerchant Ref: {merchant_ref}"
+
+        # Kirim QRIS ke pengguna
+        await message.reply_photo(qris_url, caption=caption)
     else:
-        await message.reply("Anda tidak memiliki transaksi yang tertunda.")
+        error_message = transaction.get("message", "Terjadi kesalahan saat membuat transaksi. Silakan coba lagi.")
+        await message.reply_text(f"Gagal membuat transaksi: {error_message}")
 
 bot.run()
