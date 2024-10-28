@@ -16,7 +16,7 @@ def get_qris():
     url = "https://api.tripay.co.id/v1/transaction/create"  # Ganti dengan URL endpoint yang benar
 
     headers = {
-        "Authorization": "Bearer YOUR_TRIPAY_API_KEY",  # Ganti dengan API Key Anda
+        "Authorization": "DEV-xX59dZok3hhuQSEZCnm4dXxwOTKa8e7jJT3sjXpS",  # Ganti dengan API Key Anda
         "Content-Type": "application/json"
     }
 
