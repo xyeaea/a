@@ -12,4 +12,4 @@ tripay_merchant_code = "T29105"
 
 # MongoDB Config
 mongo_uri = "mongodb+srv://botss:botss@botss.cksa9ke.mongodb.net/?retryWrites=true&w=majority&appName=botss"
-database_name = "database_name"
+db_name = "database_name"
