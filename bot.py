@@ -23,7 +23,7 @@ def generate_qris(merchant_ref):
         "currency": "IDR",
         "order_id": merchant_ref,  # Menggunakan merchant_ref sebagai order_id
         "description": "Pembayaran QRIS",
-        "callback_url": "https://yourdomain.com/callback",  # Ganti dengan URL callback Anda
+        "callback_url": "https://157.230.39.144/callback",  # Ganti dengan URL callback Anda
         "expiry": 3600,  # Waktu kadaluarsa dalam detik
     }
 
