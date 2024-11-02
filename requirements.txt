@@ -1,4 +1,3 @@
 pyrogram
 pymongo
-Flask
-requests
+pykeyboard
